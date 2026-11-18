@@ -58,7 +58,8 @@ export async function startRoomServer(options: RoomServerOptions = {}) {
   const connections = new Map<WebSocket, Connection>();
   let disposed = false;
   const server = new WebSocketServer({
-    host: config.host, port: config.port, maxPayload: 16_384,
+    // [語音通話] 調高 maxPayload 至 65,536 bytes 以容納 WebRTC SDP 連線描述封包
+    host: config.host, port: config.port, maxPayload: 65_536,
     verifyClient: ({ origin }: { origin: string }) => {
       // CLI/test clients may omit Origin; browsers on unrelated sites may not access local rooms.
       if (!origin) return true;
@@ -200,7 +201,8 @@ export async function startRoomServer(options: RoomServerOptions = {}) {
         check(typeof request.requestId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(request.requestId), '操作識別碼無效');
         requestId = request.requestId;
         if (Date.now() - connection.rateAt > 5000) { connection.rateAt = Date.now(); connection.rateCount = 0; }
-        check(++connection.rateCount <= 80, '操作太頻繁，請稍後再試');
+        // [語音通話] 調高頻率上限至 200，避免 WebRTC ICE 網路探測封包瞬間連發被誤擋
+        check(++connection.rateCount <= 200, '操作太頻繁，請稍後再試');
         if (request.type === 'create') {
           check(!connection.room, '已在房間內');
           check(rooms.size < config.maxRooms, '本機房間已滿');
@@ -267,6 +269,28 @@ export async function startRoomServer(options: RoomServerOptions = {}) {
             else if (shouldAskLabu(text,request.askLabu === true)) room.messages.push({ id: randomBytes(8).toString('hex'), author: 'Labu', channel: 'table', text: replyAsLabu(text, { playerName: seat.name, round: room.game?.round ?? 1 }), at: Date.now() });
             while (room.messages.length > 100) room.messages.shift();
             broadcast(room);
+          } else if (request.type === 'voice:offer' || request.type === 'voice:answer' || request.type === 'voice:ice') {
+            // [語音通話] 點對點轉發 WebRTC 信令給同房間內的目標玩家
+            check(typeof request.targetId === 'string', '語音目標玩家無效');
+            const targetSeat = room.members.find(m => m.id === request.targetId);
+            if (targetSeat?.socket) {
+              send(targetSeat.socket, {
+                type: request.type,
+                fromId: seat.id,
+                payload: request.payload,
+              });
+            }
+          } else if (request.type === 'voice:state') {
+            // [語音通話] 廣播麥克風靜音狀態給同房間其他玩家
+            for (const member of room.members) {
+              if (member.id !== seat.id && member.socket) {
+                send(member.socket, {
+                  type: 'voice:state',
+                  fromId: seat.id,
+                  isMuted: Boolean(request.isMuted),
+                });
+              }
+            }
           } else throw new Error('未知房間操作');
           room.requests.add(dedupeKey);
           if (room.requests.size > 512) room.requests.delete(room.requests.values().next().value!);
