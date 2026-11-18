@@ -1261,7 +1261,7 @@ function connectRoom() {
   paused = true;
   clearTimeout(timer);
   roomClient?.close();
-  const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}:5174`;
+ const wsUrl = "wss://leo4.onrender.com";
   const client = new RoomClient(hostedTrial ? "/api/rooms" : wsUrl, {
     onSnapshot: (snapshot) => {
       if (roomClient !== client) return;
