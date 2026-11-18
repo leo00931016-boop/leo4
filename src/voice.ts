@@ -128,7 +128,7 @@ export class VoiceChatManager {
       if (!audio) {
         audio = document.createElement('audio');
         audio.autoplay = true;
-        audio.playsInline = true;
+        audio.setAttribute('playsinline', 'true');
         document.body.appendChild(audio);
         this.audioElements.set(peerId, audio);
       }
