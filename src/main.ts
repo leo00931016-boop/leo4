@@ -29,6 +29,7 @@ import rabbitPortrait from "./assets/rabbit.webp";
 import robotPortrait from "./assets/robot.webp";
 import penguinPortrait from "./assets/penguin.webp";
 import { RoomClient, type RoomSnapshot, type RoomSession } from "./network";
+import { BleDiceController } from "./ble-dice";
 import {
   createGame,
   dispatch,
@@ -1261,6 +1262,7 @@ function connectRoom() {
   paused = true;
   clearTimeout(timer);
   roomClient?.close();
+  bleDice.disconnect();
  const wsUrl = "wss://leo4.onrender.com";
   const client = new RoomClient(hostedTrial ? "/api/rooms" : wsUrl, {
     onSnapshot: (snapshot) => {
@@ -1684,6 +1686,124 @@ function initVoiceButton(client: RoomClient) {
     });
     document.body.appendChild(btn);
   }
+  // ================= [M5Stack 搖動擲骰 BLE 控制] =================
+function handleM5Shake() {
+  // 1. 遊戲尚未開始或已暫停
+  if (!started || paused) {
+    toast("🎲 偵測到搖動：目前遊戲尚未開始或已暫停");
+    return;
+  }
+
+  // 2. 遊戲已結束
+  if (state.phase === "finished") {
+    toast("🎲 偵測到搖動：本局遊戲已結束");
+    return;
+  }
+
+  // 3. 角色正在棋盤移動動畫中
+  if (state.phase === "moving") {
+    toast("🎲 偵測到搖動：角色正在移動中，請稍候");
+    return;
+  }
+
+  // 4. 確認是否為當前玩家的操作權（包含 NPC 回合、多人模式非本人席位、或斷線接回中）
+  if (!canAct()) {
+    const reason = current().isNpc
+      ? `目前是 ${current().name} (NPC) 的回合`
+      : roomClient && !networkConnected
+        ? "房間網路已斷線，無法擲骰"
+        : roomClient && room?.pendingReclaim
+          ? "正在等待 NPC 完成本回合後接回席位"
+          : `目前是 ${current().name} 的回合`;
+    toast(`🎲 無法擲骰：${reason}`);
+    return;
+  }
+
+  // 5. 嚴格檢查階段：只有在 "roll" 階段才允許觸發，避免在 "action" 階段誤觸「結束回合」
+  if (state.phase !== "roll") {
+    toast("🎲 偵測到搖動：目前為行動選擇階段，請使用螢幕選項或結束回合");
+    return;
+  }
+
+  // 5.5 監獄或通緝狀態下不自動跳過，提示玩家在螢幕選擇保釋、使用出獄卡或等待
+  if (current().jailTurns > 0 || current().wantedSkip) {
+    toast("🎲 目前處於服刑／通緝狀態，請在螢幕選擇保釋、使用出獄卡或跳過");
+    return;
+  }
+
+  // 6. 若玩家目前有開啟彈窗（例如看資產、看地圖、看股市），先關閉彈窗讓畫面回到棋盤
+  const modal = document.querySelector<HTMLDialogElement>("#modal");
+  if (modal?.open) {
+    closeModal();
+  }
+
+  // 7. 通過所有驗證！呼叫與點擊螢幕 #turn-action 按鈕完全相同的合法擲骰流程
+  act({ type: "roll" });
+}
+
+function updateBleButtonUI(connected: boolean, deviceName?: string) {
+  const btn = document.getElementById("labu-ble-dice-btn");
+  if (!btn) return;
+  if (connected) {
+    btn.innerHTML = `🎲 ${esc(deviceName || "M5-Dice")} 已連線`;
+    btn.style.background = "#2563eb";
+    btn.style.borderColor = "#60a5fa";
+  } else {
+    btn.innerHTML = "🎲 連接 M5 骰子";
+    btn.style.background = "rgba(30, 41, 59, 0.9)";
+    btn.style.borderColor = "rgba(255, 255, 255, 0.25)";
+  }
+}
+
+const bleDice = new BleDiceController({
+  onShake: handleM5Shake,
+  onStatusChange: (connected, deviceName) => {
+    updateBleButtonUI(connected, deviceName);
+    if (connected) {
+      toast(`🎲 已連接 ${deviceName || "M5Stack"}，輪到你時搖動即可擲骰！`);
+    } else {
+      toast("🎲 M5Stack 已斷線，請使用螢幕按鈕操作");
+    }
+  },
+  onError: (msg) => toast(msg),
+});
+
+function initBleDiceButton() {
+  if (document.getElementById("labu-ble-dice-btn")) return;
+  const btn = document.createElement("button");
+  btn.id = "labu-ble-dice-btn";
+  Object.assign(btn.style, {
+    position: "fixed",
+    right: "16px",
+    bottom: "126px",
+    zIndex: "9999",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "10px 16px",
+    borderRadius: "999px",
+    border: "1px solid rgba(255, 255, 255, 0.25)",
+    background: "rgba(30, 41, 59, 0.9)",
+    color: "#ffffff",
+    fontSize: "14px",
+    fontWeight: "600",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+    backdropFilter: "blur(6px)",
+  });
+  document.body.appendChild(btn);
+  updateBleButtonUI(false);
+
+  btn.onclick = () => {
+    if (bleDice.isConnected) {
+      bleDice.disconnect();
+    } else {
+      void bleDice.connect();
+    }
+  };
+}
+
+initBleDiceButton();
 
   updateVoiceButtonUI(true, true);
 
