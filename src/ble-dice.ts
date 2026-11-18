@@ -1,6 +1,23 @@
 // src/ble-dice.ts
 
-// 必須與 M5Stack 韌體中的 Nordic UART Service UUID 完全一致
+interface BleRemoteGATTCharacteristic extends EventTarget {
+  value?: DataView;
+  startNotifications(): Promise<BleRemoteGATTCharacteristic>;
+}
+interface BleRemoteGATTService {
+  getCharacteristic(uuid: string): Promise<BleRemoteGATTCharacteristic>;
+}
+interface BleRemoteGATTServer {
+  connected: boolean;
+  connect(): Promise<BleRemoteGATTServer>;
+  disconnect(): void;
+  getPrimaryService(uuid: string): Promise<BleRemoteGATTService>;
+}
+interface BleDevice extends EventTarget {
+  name?: string;
+  gatt?: BleRemoteGATTServer;
+}
+
 const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const CHARACTERISTIC_UUID_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
@@ -11,8 +28,8 @@ export interface BleDiceCallbacks {
 }
 
 export class BleDiceController {
-  private device: BluetoothDevice | null = null;
-  private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+  private device: BleDevice | null = null;
+  private characteristic: BleRemoteGATTCharacteristic | null = null;
   private connected = false;
   private lastShakeAt = 0;
   private decoder = new TextDecoder("utf-8");
@@ -26,12 +43,10 @@ export class BleDiceController {
     return this.connected;
   }
 
-  /** 檢查目前瀏覽器是否支援 Web Bluetooth */
   static isSupported(): boolean {
     return typeof navigator !== "undefined" && "bluetooth" in navigator;
   }
 
-  /** 觸發瀏覽器藍牙配對視窗並連線 */
   async connect(): Promise<void> {
     if (!BleDiceController.isSupported()) {
       this.callbacks.onError(
@@ -41,8 +56,13 @@ export class BleDiceController {
     }
 
     try {
-      // 透過 Service UUID 過濾，只顯示支援本遊戲的 M5Stack 裝置
-      const device = await navigator.bluetooth.requestDevice({
+      const nav = navigator as unknown as {
+        bluetooth: {
+          requestDevice(options: { filters: { services: string[] }[] }): Promise<BleDevice>;
+        };
+      };
+
+      const device = await nav.bluetooth.requestDevice({
         filters: [{ services: [SERVICE_UUID] }],
       });
 
@@ -63,11 +83,9 @@ export class BleDiceController {
 
       this.characteristic = char;
       this.connected = true;
-      // 剛連線時重設時間戳，確保不處理任何殘留舊事件
       this.lastShakeAt = performance.now();
       this.callbacks.onStatusChange(true, device.name || "M5-Dice");
     } catch (err) {
-      // 使用者主動取消配對視窗時不視為嚴重錯誤
       if (err instanceof DOMException && err.name === "NotFoundError") {
         return;
       }
@@ -78,7 +96,6 @@ export class BleDiceController {
     }
   }
 
-  /** 主動斷開連線 */
   disconnect(): void {
     if (this.device?.gatt?.connected) {
       this.device.gatt.disconnect();
@@ -89,14 +106,13 @@ export class BleDiceController {
 
   private handleCharacteristicValueChanged = (event: Event) => {
     if (!this.connected) return;
-    const target = event.target as BluetoothRemoteGATTCharacteristic;
+    const target = event.target as BleRemoteGATTCharacteristic;
     if (!target.value) return;
 
     const text = this.decoder.decode(target.value).trim();
     try {
       const data = JSON.parse(text);
       if (data?.event === "SHAKE") {
-        // 前端雙重去彈跳保護（800ms 內不重複觸發）
         const now = performance.now();
         if (now - this.lastShakeAt < 800) return;
         this.lastShakeAt = now;
