@@ -30,6 +30,7 @@ import robotPortrait from "./assets/robot.webp";
 import penguinPortrait from "./assets/penguin.webp";
 import { RoomClient, type RoomSnapshot, type RoomSession } from "./network";
 import { BleDiceController } from "./ble-dice";
+let bleDice: BleDiceController | null = null;
 import {
   createGame,
   dispatch,
@@ -1262,7 +1263,7 @@ function connectRoom() {
   paused = true;
   clearTimeout(timer);
   roomClient?.close();
-  bleDice.disconnect();
+  bleDice?.disconnect();
  const wsUrl = "wss://leo4.onrender.com";
   const client = new RoomClient(hostedTrial ? "/api/rooms" : wsUrl, {
     onSnapshot: (snapshot) => {
@@ -1755,7 +1756,7 @@ function updateBleButtonUI(connected: boolean, deviceName?: string) {
   }
 }
 
-const bleDice = new BleDiceController({
+bleDice = new BleDiceController({
   onShake: handleM5Shake,
   onStatusChange: (connected, deviceName) => {
     updateBleButtonUI(connected, deviceName);
@@ -1795,7 +1796,7 @@ function initBleDiceButton() {
   updateBleButtonUI(false);
 
   btn.onclick = () => {
-    if (bleDice.isConnected) {
+    if (bleDice?.isConnected) {
       bleDice.disconnect();
     } else {
       void bleDice.connect();
