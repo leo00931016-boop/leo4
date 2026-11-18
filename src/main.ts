@@ -1769,14 +1769,14 @@ bleDice = new BleDiceController({
   onError: (msg) => toast(msg),
 });
 
-function initBleDiceButton() {
+  function initBleDiceButton() {
   if (document.getElementById("labu-ble-dice-btn")) return;
   const btn = document.createElement("button");
   btn.id = "labu-ble-dice-btn";
   Object.assign(btn.style, {
     position: "fixed",
-    right: "16px",
-    bottom: "126px",
+    left: "16px",
+    bottom: "76px",
     zIndex: "9999",
     display: "flex",
     alignItems: "center",
@@ -1799,7 +1799,7 @@ function initBleDiceButton() {
     if (bleDice?.isConnected) {
       bleDice?.disconnect();
     } else {
-      void bleDice.connect();
+      void bleDice?.connect();
     }
   };
 }
