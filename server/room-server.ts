@@ -333,7 +333,7 @@ export async function startRoomServer(options: RoomServerOptions = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const npcChat = createNpcChat(loadNpcConfig());
   const npcHttp = await startNpcHttpServer(npcChat);
-  const service = await startRoomServer({ npcChat, port: Number(process.env.ROOM_PORT ?? 5174), host: process.env.ROOM_HOST ?? '127.0.0.1', allowedOrigins: process.env.ROOM_ALLOWED_ORIGINS?.split(',').map(origin => origin.trim()).filter(Boolean) });
+ const service = await startRoomServer({ npcChat, port: Number(process.env.PORT ?? process.env.ROOM_PORT ?? 5174), host: process.env.ROOM_HOST ?? '127.0.0.1', allowedOrigins: process.env.ROOM_ALLOWED_ORIGINS?.split(',').map(origin => origin.trim()).filter(Boolean) });
   console.log(`Labu local room service listening at ${service.url}`);
   const stop = () => { void Promise.all([service.close(),npcHttp.close()]).then(() => process.exit(0)); };
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
