@@ -1308,7 +1308,6 @@ function connectRoom() {
   initVoiceButton(client); // [語音通話] 初始化語音按鈕
   return client;
 }
- 
 function showRoomDialog() {
   if (room && networkConnected) {
     showRoomWaiting();
