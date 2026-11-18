@@ -1,5 +1,6 @@
 import type { GameAction, GameState, Theme } from './game-types';
 import type { ChatMessage } from './companion';
+import { VoiceChatManager } from './voice';
 
 export interface RoomSession { code: string; token: string; playerId: string }
 export interface RoomSnapshot {
@@ -20,6 +21,7 @@ export interface RoomClientOptions {
   onError?: (message: string) => void;
   onSession?: (session: RoomSession) => void;
   onClose?: () => void;
+  onVoiceStateChange?: (playerId: string, isMuted: boolean) => void;
 }
 export interface CreateRoomOptions { name: string; seats: 2 | 3 | 4; maxRounds?: number; theme?: Theme }
 export interface JoinRoomOptions { code: string; name: string; theme?: Theme }
@@ -28,6 +30,7 @@ export interface JoinRoomOptions { code: string; name: string; theme?: Theme }
 export class RoomClient {
   snapshot: RoomSnapshot | null = null;
   session: RoomSession | null = null;
+  readonly voice: VoiceChatManager;
   private socket: WebSocket | null = null;
   private connecting: Promise<void> | null = null;
   private pending = new Map<string, { resolve: () => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
@@ -46,6 +49,22 @@ export class RoomClient {
     if (fingerprint === this.snapshotFingerprint) return;
     this.snapshotFingerprint = fingerprint;
     this.snapshot = snapshot;
+
+    // 自動同步房間內玩家的語音 P2P 連線
+    const activeIds = new Set(snapshot.players.filter(p => p.connected).map(p => p.id));
+    for (const player of snapshot.players) {
+      // 由 ID 字典序較小的一方主動發起 Offer，避免雙方同時發起造成連線衝突
+      if (player.id !== snapshot.selfId && player.connected && snapshot.selfId < player.id) {
+        void this.voice.connectToPeer(player.id);
+      }
+    }
+    // 清理已離開或斷線玩家的語音連線
+    for (const p of snapshot.players) {
+      if (!activeIds.has(p.id) && p.id !== snapshot.selfId) {
+        this.voice.removePeer(p.id);
+      }
+    }
+
     this.options.onSnapshot(snapshot);
   }
 
@@ -107,7 +126,13 @@ export class RoomClient {
     return operation;
   }
 
-  constructor(private readonly url = 'ws://127.0.0.1:5174', private readonly options: RoomClientOptions) {}
+  constructor(private readonly url = 'ws://127.0.0.1:5174', private readonly options: RoomClientOptions) {
+    this.voice = new VoiceChatManager((signalData) => {
+      if (!this.closed && this.socket?.readyState === WebSocket.OPEN) {
+        this.send(signalData.type, signalData).catch(() => {});
+      }
+    });
+  }
 
   create(options: CreateRoomOptions): Promise<void> { return this.send('create', options); }
   join(options: JoinRoomOptions): Promise<void> { return this.send('join', options); }
@@ -122,6 +147,7 @@ export class RoomClient {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.voice.destroyAll();
     if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = null;
     for (const controller of this.controllers) controller.abort();
@@ -179,6 +205,10 @@ export class RoomClient {
     } else if (message.type === 'session') {
       this.session = message.session as RoomSession;
       this.options.onSession?.(this.session);
+    } else if (message.type === 'voice:offer' || message.type === 'voice:answer' || message.type === 'voice:ice') {
+      void this.voice.handleSignal(message);
+    } else if (message.type === 'voice:state' && typeof message.fromId === 'string') {
+      this.options.onVoiceStateChange?.(message.fromId, Boolean(message.isMuted));
     } else if (message.type === 'ack' || message.type === 'error') {
       const pending = this.pending.get(message.requestId);
       if (pending) {
