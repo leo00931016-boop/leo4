@@ -1294,10 +1294,20 @@ function connectRoom() {
     onClose: () => {
       if (roomClient === client) {
         networkConnected = false;
+        updateVoiceButtonUI(false);
         render();
         toast("房間連線已中斷，可按「邀請好友」重新連線。");
       }
     },
+    onVoiceStateChange: (playerId, isMuted) => {
+      const playerName = room?.players.find((p) => p.id === playerId)?.name ?? "隊友";
+      toast(isMuted ? `🔇 ${playerName} 已靜音` : `🎙️ ${playerName} 已開啟語音`);
+    },
+  });
+  roomClient = client;
+  initVoiceButton(client); // [語音通話] 初始化語音按鈕
+  return client;
+}
   });
   roomClient = client;
   return client;
@@ -1632,4 +1642,68 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   navigator.serviceWorker
     .register("/sw.js")
     .catch(() => console.warn("離線快取未能啟用，遊戲仍可在本機伺服器運作。"));
+}
+// ================= [語音通話 UI 控制] =================
+let voiceMicInitialized = false;
+
+function updateVoiceButtonUI(visible: boolean, isMuted = true) {
+  const btn = document.getElementById("labu-voice-btn");
+  if (!btn) return;
+  btn.style.display = visible ? "flex" : "none";
+  if (isMuted) {
+    btn.innerHTML = "🔇 開啟語音";
+    btn.style.background = "rgba(30, 41, 59, 0.9)";
+    btn.style.borderColor = "rgba(255, 255, 255, 0.25)";
+  } else {
+    btn.innerHTML = "🎙️ 通話中 (點擊靜音)";
+    btn.style.background = "#16a34a";
+    btn.style.borderColor = "#4ade80";
+  }
+}
+
+function initVoiceButton(client: RoomClient) {
+  voiceMicInitialized = false;
+  let btn = document.getElementById("labu-voice-btn");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "labu-voice-btn";
+    Object.assign(btn.style, {
+      position: "fixed",
+      right: "16px",
+      bottom: "76px",
+      zIndex: "9999",
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      padding: "10px 16px",
+      borderRadius: "999px",
+      border: "1px solid rgba(255, 255, 255, 0.25)",
+      background: "rgba(30, 41, 59, 0.9)",
+      color: "#ffffff",
+      fontSize: "14px",
+      fontWeight: "600",
+      cursor: "pointer",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+      backdropFilter: "blur(6px)",
+    });
+    document.body.appendChild(btn);
+  }
+
+  updateVoiceButtonUI(true, true);
+
+  btn.onclick = async () => {
+    if (roomClient !== client) return;
+    if (!voiceMicInitialized) {
+      const ok = await client.voice.enableMic();
+      if (ok) {
+        voiceMicInitialized = true;
+        updateVoiceButtonUI(true, false);
+        toast("🎙️ 麥克風已開啟，可與同房玩家語音通話");
+      }
+    } else {
+      const nextMuted = !client.voice.getMutedState();
+      client.voice.setMute(nextMuted);
+      updateVoiceButtonUI(true, nextMuted);
+    }
+  };
 }
