@@ -1797,7 +1797,7 @@ function initBleDiceButton() {
 
   btn.onclick = () => {
     if (bleDice?.isConnected) {
-      bleDice.disconnect();
+      bleDice?.disconnect();
     } else {
       void bleDice.connect();
     }
